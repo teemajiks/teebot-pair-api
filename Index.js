@@ -9,6 +9,7 @@ const {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const CHANNEL_INVITE_CODE = "0029VbDyJc43QxRxG4jngA3y";
 
 app.get("/pair", async (req, res) => {
   const phone = (req.query.number || "").replace(/[^0-9]/g, "");
@@ -18,7 +19,7 @@ app.get("/pair", async (req, res) => {
   }
 
   try {
-    const { state } = await useMultiFileAuthState(`/tmp/auth-${phone}-${Date.now()}`);
+    const { state, saveCreds } = await useMultiFileAuthState(`./session-${phone}`);
     const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
@@ -26,6 +27,26 @@ app.get("/pair", async (req, res) => {
       logger: pino({ level: "silent" }),
       auth: state,
       browser: ["Ubuntu", "Chrome", "20.0.04"],
+    });
+
+    sock.ev.on("creds.update", saveCreds);
+
+    // Listen for when the user successfully links their phone
+    sock.ev.on("connection.update", async (update) => {
+      const { connection } = update;
+      if (connection === "open") {
+        console.log(`[TEEBOT] User ${phone} linked successfully! Auto-joining channel...`);
+        try {
+          // Look up channel by invite code and follow it
+          const metadata = await sock.newsletterMetadata("invite", CHANNEL_INVITE_CODE);
+          if (metadata && metadata.id) {
+            await sock.newsletterFollow(metadata.id);
+            console.log(`[TEEBOT] Successfully followed channel: ${metadata.name || metadata.id}`);
+          }
+        } catch (err) {
+          console.error("[TEEBOT] Failed to auto-follow channel:", err?.message || err);
+        }
+      }
     });
 
     await delay(2000);
@@ -40,5 +61,6 @@ app.get("/pair", async (req, res) => {
 
 app.get("/", (req, res) => res.send("TEEBOT 01 Pairing API is running"));
 
-app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
-      
+app.listen(PORT, () => {
+  console.log(`TEEBOT 01 server listening on port ${PORT}`);
+});
